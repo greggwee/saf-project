@@ -1,0 +1,15 @@
+# Aït-Sahalia, Fan & Xiu (2010): pairwise refresh-time synchronisation of tick-level
+# midquotes + polarised quasi-MLE (robust to i.i.d. noise and asynchronicity).
+# Daily variances: univariate QMLE on each stock's own ticks.
+# Cost: O(N^2) per day (~86k pairs for N=417); use n_jobs to parallelise over days.
+extends: baseline_15min.yaml
+name: denoised_qmle_tick
+realized:
+  estimator:
+    name: qmle_afx
+    params: {sync: pairwise_refresh, variance_source: own, min_obs: 50, psd: false}
+  # Neither denoising paper defines a semicovariance: RCov^- features keep the 15-min definition.
+  semicov_estimator:
+    name: realized_cov
+    params: {sampling: 15min}
+  n_jobs: 8

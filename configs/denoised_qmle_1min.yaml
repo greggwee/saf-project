@@ -1,0 +1,11 @@
+# AFX (2010) QMLE on a common 1-minute previous-tick grid (e.g. 1-minute bars).
+# Synchronisation is coarser than pairwise refresh time but the whole correlation
+# matrix is solved in one vectorised batch, so it is much cheaper.
+extends: baseline_15min.yaml
+name: denoised_qmle_1min
+data:
+  intraday: data/intraday/bars_1min
+realized:
+  estimator:
+    name: qmle_afx
+    params: {sync: 1min, variance_source: sync, min_obs: 50}

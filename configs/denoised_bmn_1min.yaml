@@ -1,0 +1,9 @@
+# BMN (2019) on a common 1-minute grid (e.g. 1-minute bars) instead of refresh time.
+extends: baseline_15min.yaml
+name: denoised_bmn_1min
+data:
+  intraday: data/intraday/bars_1min
+realized:
+  estimator:
+    name: bmn_factor
+    params: {sync: 1min, n_factors: auto, k_max: 10, theta: 0.3333333, pilot: mrker, ic_sampling: 5min, min_obs: 50}

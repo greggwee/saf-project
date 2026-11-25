@@ -1,0 +1,11 @@
+# BLT §6.2 / Table 8: alternative fitting procedures on the 25 main features.
+extends: baseline_15min.yaml
+name: robustness_ml
+models:
+  specs:
+    - {name: HAR,   method: ols,   features: har}
+    - {name: LASSO, method: lasso, features: all}
+    - {name: Ridge, method: ridge, features: all}
+    - {name: ENet,  method: enet,  features: all, params: {l1_ratio: 0.5}}
+    - {name: PCR,   method: pcr,   features: all, params: {max_components: 20}}
+    - {name: FNN,   method: fnn,   features: all, params: {hidden: [4, 2]}}

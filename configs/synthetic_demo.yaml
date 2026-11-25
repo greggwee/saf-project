@@ -1,0 +1,21 @@
+# Runs the whole pipeline on synthetic data (create it first):
+#   corrforecast synthetic data/synthetic --n-assets 40 --end 2009-12-31
+#   corrforecast run configs/synthetic_demo.yaml
+extends: baseline_15min.yaml
+name: synthetic_demo
+data:
+  intraday: data/synthetic/intraday
+  daily: data/synthetic/daily.parquet
+  monthly: data/synthetic/monthly.parquet
+  market: data/synthetic/market.parquet
+  start: "2001-01-01"
+  end: "2009-12-31"
+features:
+  exp_window: 250
+  factor_characteristics: [beta, size, bm, mom]
+models:
+  first_test_year: 2008
+  last_test_year: 2009
+applications:
+  long_short_characteristics: [beta, size, bm, mom]
+  long_short_quantiles: 5

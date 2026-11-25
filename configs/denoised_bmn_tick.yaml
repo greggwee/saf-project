@@ -1,0 +1,12 @@
+# Bollerslev, Meddahi & Nyawa (2019): refresh-time synchronised tick data, MRker pilot,
+# rotated latent factors, pre-averaged factor variances (PRV) and loadings (MRC);
+# number of factors chosen daily by Bai-Ng on 5-minute returns. Robust to noise with a
+# factor structure; positive definite by construction.
+extends: baseline_15min.yaml
+name: denoised_bmn_tick
+realized:
+  estimator:
+    name: bmn_factor
+    params: {sync: refresh, n_factors: auto, k_max: 10, theta: 0.3333333, pilot: mrker,
+             ic_sampling: 5min, min_obs: 195}
+  n_jobs: 8

@@ -1,0 +1,9 @@
+# Diagnostic: plain realized covariance on a 1-minute grid. Expected to be WORSE than the
+# 15-minute baseline because of microstructure noise and the Epps effect -- this is the
+# problem the denoised variants below address.
+extends: baseline_15min.yaml
+name: naive_1min
+realized:
+  estimator:
+    name: realized_cov
+    params: {sampling: 1min}
