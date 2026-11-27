@@ -1,0 +1,8 @@
+.env
+.venv/
+mid15m/
+__pycache__/
+
+
+HANDOFF.md
+modal_run_2016-06_2016-06.csv
