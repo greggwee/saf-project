@@ -18,3 +18,4 @@ data/meta/
 # Old default output locations (before data/ was split by source)
 mid15m/
 wrds_raw/
+data_wrds_15min/
