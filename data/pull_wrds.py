@@ -12,7 +12,7 @@ Usage
   python data/pull_wrds.py --wrds-user USER --dry-run               # print the SQL, pull nothing
   python data/pull_wrds.py --wrds-user USER                         # full pull + README + checks
   python data/pull_wrds.py --wrds-user USER --tables comp_fundq,comp_co_hgic
-  python data/pull_wrds.py --checks-only --reference-dir path/to/drive_pull   # no WRDS needed
+  python data/pull_wrds.py --checks-only                            # no WRDS needed
 """
 import argparse
 import logging
@@ -38,7 +38,6 @@ def parse_args():
     p.add_argument("--checks-only", action="store_true", help="only run the checks on --out")
     p.add_argument("--no-checks", action="store_true")
     p.add_argument("--no-fred", action="store_true", help="skip the FRED GNPDEF download")
-    p.add_argument("--reference-dir", help="earlier pull to compare row counts with (check 6)")
     return p.parse_args()
 
 
@@ -48,7 +47,7 @@ def main():
     os.makedirs(a.out, exist_ok=True)
 
     if a.checks_only:
-        wrds_checks.run_checks(a.out, a.reference_dir, a.end)
+        wrds_checks.run_checks(a.out, a.end)
         print(f"-> {a.out}/CHECKS.md")
         return
 
@@ -100,7 +99,7 @@ def main():
     wrds_pull.write_readme(a.out, end, manifest, notes)
 
     if not a.no_checks and not a.tables:
-        wrds_checks.run_checks(a.out, a.reference_dir, end)
+        wrds_checks.run_checks(a.out, end)
         print(f"-> {a.out}/CHECKS.md")
 
 

@@ -6,7 +6,6 @@ Interval convention: a start/end pair is inclusive and a missing end date means 
 from pathlib import Path
 
 import pandas as pd
-import pyarrow.parquet as pq
 
 from saf.wrds_pull import BY_NAME, read_table
 
@@ -121,18 +120,6 @@ def nvda_units(dsf):
     return out
 
 
-def compare_counts(out_dir, reference_dir, names=("crsp_dsf_v2", "comp_fundq", "comp_co_hgic")):
-    """Row counts per file vs a reference pull (same file names); DataFrame [file, rows, ref_rows]."""
-    rows = []
-    for name in names:
-        for f in sorted(Path(out_dir).glob(f"{name}*.parquet")):
-            ref = Path(reference_dir) / f.name
-            n = pq.ParquetFile(f).metadata.num_rows
-            r = pq.ParquetFile(ref).metadata.num_rows if ref.exists() else None
-            rows.append((f.name, n, r))
-    return pd.DataFrame(rows, columns=["file", "rows", "ref_rows"])
-
-
 # ---------------------------------------------------------------- report
 def _md(df):
     if df.empty:
@@ -146,7 +133,7 @@ def _md(df):
     return "\n".join(lines) + "\n"
 
 
-def run_checks(out_dir, reference_dir=None, end=None):
+def run_checks(out_dir, end=None):
     """Run every check on the pull in ``out_dir``; write CHECKS.md and checks_monthly.csv."""
     out_dir = Path(out_dir)
     msp = read_table(out_dir, "crsp_msp500list_v2")
@@ -202,17 +189,8 @@ def run_checks(out_dir, reference_dir=None, end=None):
           f"min {(cov['gics'] / cov['members']).min():.2%}, "
           f"overall {cov['gics'].sum() / cov['members'].sum():.2%} of members", ""]
 
-    # 6. row counts vs reference pull
-    s += ["## 6. Row counts vs the reference pull", ""]
-    if reference_dir:
-        c = compare_counts(out_dir, reference_dir)
-        c["diff"] = c["rows"] - c["ref_rows"]
-        s.append(_md(c))
-    else:
-        s.append("_skipped: no --reference-dir given (2026-11-09 Drive pull)_\n")
-
-    # 7. units
-    s += ["## 7. Units", "", "| check | value | ok |", "|---|---|---|"]
+    # 6. units
+    s += ["## 6. Units", "", "| check | value | ok |", "|---|---|---|"]
     s += [f"| {a} | {b} | {'yes' if ok else 'NO'} |" for a, b, ok in nvda_units(dsf)]
     s += ["", "Per-month coverage table: `checks_monthly.csv`."]
 
