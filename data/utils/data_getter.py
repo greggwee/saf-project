@@ -25,7 +25,6 @@ Usage
 import argparse
 import logging
 import os
-import stat
 import sys
 import time
 from pathlib import Path
@@ -34,89 +33,31 @@ import numpy as np
 import pandas as pd
 
 from saf.universe import crsp_to_taq_symbol, get_monthly_universe, load_segments
+from saf.wrds import PGPASS_HOST, PGPASS_PORT, WrdsSession, init_pgpass, pgpass_ok  # noqa: F401
 
 log = logging.getLogger("data_getter")
 conn = None
+_session = None
 WRDS_USER = None
-PGPASS_HOST = "wrds-pgdata.wharton.upenn.edu"
-PGPASS_PORT = 9737
 
 
 # ---------------------------------------------------------------- connexion WRDS
-def pgpass_ok(user):
-    p = Path.home() / ".pgpass"
-    if not p.exists():
-        return False
-    return any(line.startswith(f"{PGPASS_HOST}:{PGPASS_PORT}:") and f":{user}:" in line
-               for line in p.read_text().splitlines())
-
-
-def init_pgpass(user):
-    """Crée ~/.pgpass via le client wrds (saisie interactive du mot de passe, une seule fois)."""
-    import wrds
-    c = wrds.Connection(wrds_username=user)   # demande le mot de passe (et Duo si exigé)
-    c.create_pgpass_file()
-    c.close()
-    p = Path.home() / ".pgpass"
-    p.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    print(f"{p} créé (chmod 600).")
-
-
 def connect():
-    """Connexion WRDS sans aucune invite.
-
-    Le client wrds n'ouvre son prompt (username/password) que si la 1re tentative échoue, et
-    masque alors l'erreur réelle. On affiche l'erreur (verbose=True) et on remplace le prompt
-    par une exception explicite.
-    Identifiants : WRDS_PASSWORD (variable d'environnement / secret Modal) sinon ~/.pgpass.
-    """
-    global conn
-    import wrds
-    import wrds.sql
-
-    def _no_prompt(self):
-        raise RuntimeError(
-            "Connexion WRDS refusée (cause dans la ligne err=... ci-dessus). Causes usuelles : "
-            "mot de passe/username faux, notification Duo non validée à temps, IP refusée.")
-
-    wrds.sql.Connection._Connection__get_user_credentials = _no_prompt
-
-    kw = {"wrds_username": WRDS_USER, "verbose": True}
-    pwd = os.environ.get("WRDS_PASSWORD")
-    if pwd:
-        kw["wrds_password"] = pwd
-    elif not pgpass_ok(WRDS_USER):
-        sys.exit(f"Ni WRDS_PASSWORD ni ~/.pgpass pour {WRDS_USER}. Lancez une fois : "
-                 f"python data_getter.py --init-pgpass --wrds-user {WRDS_USER}")
-    if conn is not None:
-        try:
-            conn.close()
-        except Exception:
-            pass
-    log.info("connexion WRDS en tant que %s (%s)", WRDS_USER, "mot de passe env" if pwd else ".pgpass")
-    conn = wrds.Connection(**kw)
+    """Connexion WRDS sans invite (voir saf.wrds.WrdsSession)."""
+    global conn, _session
+    if _session is None or _session.user != WRDS_USER:
+        _session = WrdsSession(WRDS_USER, log=log)
+    conn = _session.connect()
     return conn
 
 
 def sql(query, params=None, date_cols=None, retries=1):
     """raw_sql avec UNE reconnexion + nouvelle tentative si la connexion est coupée.
     Si la seconde tentative échoue, l'erreur remonte (le jour est noté dans failed.csv)."""
-    attempts = retries + 1
-    for k in range(attempts):
-        try:
-            return conn.raw_sql(query, params=params, date_cols=date_cols)
-        except Exception as e:
-            # Nouvelle tentative uniquement pour une vraie coupure (erreurs de pilote/connexion),
-            # jamais pour un bug de code ou une table absente.
-            transient = (type(e).__name__ in ("OperationalError", "InterfaceError", "DisconnectionError")
-                         or isinstance(e, (ConnectionError, TimeoutError)))
-            missing = "does not exist" in str(e).lower()
-            if missing or not transient or k == attempts - 1:
-                raise
-            wait = 30
-            log.warning("connexion perdue (%s) -> reconnexion dans %ss", str(e)[:120], wait)
-            time.sleep(wait)
-            connect()
+    global conn
+    out = _session.sql(query, params=params, date_cols=date_cols, retries=retries)
+    conn = _session.conn
+    return out
 
 
 # ---------------------------------------------------------------- univers
