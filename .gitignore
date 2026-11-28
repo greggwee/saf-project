@@ -5,4 +5,5 @@ __pycache__/
 
 
 HANDOFF.md
-modal_run_2016-06_2016-06.csv
+modal_run_2016-06_2016-06.csv*.egg-info/
+.pytest_cache/
