@@ -26,7 +26,7 @@ def _fixture():
     d = T("2020-01-31")
     mem = pd.DataFrame({"date": [d, d, d], "permno": [1, 2, 3]})
     dsf = pd.DataFrame({"permno": [1, 2], "dlycaldt": [d, d], "shrout": [1.0, 1.0], "dlyfacprc": [1.0, 1.0]})
-    ccm = pd.DataFrame({"gvkey": ["g1", "g2", "g2"], "lpermno": [1, 2, 2],
+    ccm = pd.DataFrame({"gvkey": ["g1", "g2", "g2"], "lpermno": [1.0, 2.0, 2.0],   # float8 on WRDS
                         "linkdt": [T("2000-01-01"), T("2000-01-01"), T("2019-01-01")],
                         "linkenddt": [pd.NaT, T("2010-01-01"), pd.NaT]})
     fundq = pd.DataFrame({"gvkey": ["g1", "g2"], "datadate": [T("2019-12-31"), T("2018-12-31")]})

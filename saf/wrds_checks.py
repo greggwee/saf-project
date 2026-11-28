@@ -54,6 +54,7 @@ def members_missing_dsf(mem, dsf):
 def member_links(mem, ccm):
     """Members with their CCM gvkey valid at that date: [date, permno, gvkey] (gvkey NaN = no link)."""
     lk = ccm.rename(columns={"lpermno": "permno"})[["permno", "gvkey", "linkdt", "linkenddt"]]
+    lk = lk.dropna(subset=["permno"]).astype({"permno": "int64"})   # lpermno is float8 in CCM
     x = mem.merge(lk, on="permno", how="left")
     ok = (x["linkdt"] <= x["date"]) & (x["date"] <= x["linkenddt"].fillna(pd.Timestamp.max))
     linked = x[ok][["date", "permno", "gvkey"]].drop_duplicates(["date", "permno"])
