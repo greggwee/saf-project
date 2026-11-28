@@ -1,4 +1,4 @@
-# Usage: python -I build_sp500_pit_ids.py <dir with msp500/secinfo/ccm/ibes/ciq .parquet> <out dir>
+# Usage: python -I data/scripts/build_sp500_pit_ids.py <dir with msp500/secinfo/ccm/ibes/ciq .parquet> data/universe
 # Inputs = Drive files renamed: crsp_msp500list_v2->msp500, crsp_stksecurityinfohist->secinfo,
 #   crsp_ccmxpf_lnkhist->ccm, wrdsapps_ibcrsphist->ibes, ciq_wrds_gvkey->ciq
 import pandas as pd, sys

@@ -8,13 +8,14 @@ Mise en place (une fois, en local)
   # Splits/dividendes : régularisés a posteriori en local avec adjust_overnight.py
   # (ne pas mettre CRSP sur le volume, sinon les jours de split passent à NaN)
 
-Dossier local attendu : data_getter.py, sp500_pit_identifiers_segments.csv, modal_app.py
+Fichiers locaux embarqués : data/scripts/data_getter.py, saf/, data/universe/sp500_pit_identifiers_segments.csv
 
 Lancement
   modal run modal_app.py --check                                # schémas WRDS
   modal run modal_app.py --start 2016-06 --end 2016-06          # test 1 mois
-  modal run --detach modal_app.py --start 2008-01 --end 2026-06 # run complet, survit à la fermeture du terminal
-  modal run modal_app.py --overnight-only                       # recalcule les overnight
+  modal run --detach modal_app.py --spawn --start 2008-01 --end 2026-06   # run complet, Mac libre
+  modal run modal_app.py --status --start 2008-01 --end 2026-06           # avancement
+  modal run modal_app.py --overnight-only                                 # à la fin
 
 Récupérer les résultats puis régulariser les splits/dividendes en local
   modal volume get taq-15m /data_wrds_15min ./
@@ -34,8 +35,8 @@ SEGMENTS = "sp500_pit_identifiers_segments.csv"
 
 # Conteneurs simultanés = connexions WRDS simultanées. WRDS limite le nombre de connexions
 # par utilisateur et chaque nouveau conteneur peut déclencher une validation Duo : rester bas.
-MAX_CONTAINERS = 3
-MONTH_TIMEOUT = 6 * 3600          # secondes par mois (un mois ~ 21 jours x 2 requêtes / lot)
+MAX_CONTAINERS = 4
+MONTH_TIMEOUT = 3 * 3600          # mesuré : ~130 s/jour -> ~45 min/mois ; marge x4
 
 here = Path(__file__).parent
 image = (
@@ -45,7 +46,8 @@ image = (
     .pip_install("wrds==3.3.0", "pandas==2.2.3", "pandas_market_calendars==5.5.0",
                  "sqlalchemy>=2,<2.1", "numpy<2.3", "pyarrow")
     .add_local_file(here / "data_getter.py", "/root/data_getter.py")
-    .add_local_file(here / SEGMENTS, f"/root/{SEGMENTS}")
+    .add_local_dir(here.parents[1] / "saf", "/root/saf")   # shared library (saf.universe, ...)
+    .add_local_file(here.parent / "universe" / SEGMENTS, f"/root/{SEGMENTS}")
 )
 
 app = modal.App(APP_NAME, image=image)
@@ -81,7 +83,7 @@ def _setup():
 
 
 @app.function(secrets=[wrds_secret], volumes={MOUNT: vol}, timeout=MONTH_TIMEOUT,
-              max_containers=MAX_CONTAINERS, cpu=2, memory=8192)   # , proxy=PROXY
+              max_containers=MAX_CONTAINERS, cpu=1, memory=2048)   # , proxy=PROXY
 def run_month(month: str) -> dict:
     dg = _setup()
     out_dir = Path(MOUNT) / OUT_SUBDIR
@@ -113,13 +115,44 @@ def run_check():
     dg.check()
 
 
+@app.function(volumes={MOUNT: vol}, timeout=300)
+def run_status(start: str, end: str) -> dict:
+    import pandas as pd
+    vol.reload()
+    out_dir = Path(MOUNT) / OUT_SUBDIR
+    months = [str(m) for m in pd.period_range(start, end, freq="M")]
+    done = [m for m in months if (out_dir / f"{m}.parquet").exists()]
+    failed = {}
+    for f in sorted(out_dir.glob("failed_*.csv")):
+        for _, r in pd.read_csv(f).iterrows():
+            failed[str(r["period"])] = str(r["error"])[:150]
+    return {"done": done, "todo": [m for m in months if m not in done], "failed": failed}
+
+
 @app.local_entrypoint()
 def main(start: str = "2016-06", end: str = "2016-06", check: bool = False,
-         overnight_only: bool = False, no_overnight: bool = False):
+         overnight_only: bool = False, no_overnight: bool = False,
+         spawn: bool = False, status: bool = False):
     import pandas as pd
 
     if check:
         run_check.remote()
+        return
+    if status:
+        s = run_status.remote(start, end)
+        print(f"terminés {len(s['done'])}, restants {len(s['todo'])}, échecs {len(s['failed'])}")
+        if s["todo"]:
+            print("restants :", " ".join(s["todo"][:30]), "..." if len(s["todo"]) > 30 else "")
+        for k, v in s["failed"].items():
+            print(" ", k, v)
+        return
+    if spawn:
+        # Envoie tous les mois puis rend la main : le Mac peut s'éteindre (avec --detach).
+        months = [str(m) for m in pd.period_range(start, end, freq="M")]
+        run_month.spawn_map(months)
+        print(f"{len(months)} mois envoyés ({MAX_CONTAINERS} conteneurs max). Suivi : "
+              f"modal run modal_app.py --status --start {start} --end {end} ; "
+              "puis, une fois tout terminé : modal run modal_app.py --overnight-only")
         return
     if not overnight_only:
         months = [str(m) for m in pd.period_range(start, end, freq="M")]

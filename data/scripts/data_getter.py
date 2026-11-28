@@ -25,7 +25,6 @@ Usage
 import argparse
 import logging
 import os
-import stat
 import sys
 import time
 from pathlib import Path
@@ -33,133 +32,40 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from saf.universe import crsp_to_taq_symbol, get_monthly_universe, load_segments
+from saf.wrds import PGPASS_HOST, PGPASS_PORT, WrdsSession, init_pgpass, pgpass_ok  # noqa: F401
+
 log = logging.getLogger("data_getter")
+DATA_DIR = Path(__file__).resolve().parents[1]                     # dossier data/ du repo
+SEGMENTS = DATA_DIR / "universe" / "sp500_pit_identifiers_segments.csv"
 conn = None
+_session = None
 WRDS_USER = None
-PGPASS_HOST = "wrds-pgdata.wharton.upenn.edu"
-PGPASS_PORT = 9737
 
 
 # ---------------------------------------------------------------- connexion WRDS
-def pgpass_ok(user):
-    p = Path.home() / ".pgpass"
-    if not p.exists():
-        return False
-    return any(line.startswith(f"{PGPASS_HOST}:{PGPASS_PORT}:") and f":{user}:" in line
-               for line in p.read_text().splitlines())
-
-
-def init_pgpass(user):
-    """Crée ~/.pgpass via le client wrds (saisie interactive du mot de passe, une seule fois)."""
-    import wrds
-    c = wrds.Connection(wrds_username=user)   # demande le mot de passe (et Duo si exigé)
-    c.create_pgpass_file()
-    c.close()
-    p = Path.home() / ".pgpass"
-    p.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    print(f"{p} créé (chmod 600).")
-
-
 def connect():
-    """Connexion WRDS sans aucune invite.
-
-    Le client wrds n'ouvre son prompt (username/password) que si la 1re tentative échoue, et
-    masque alors l'erreur réelle. On affiche l'erreur (verbose=True) et on remplace le prompt
-    par une exception explicite.
-    Identifiants : WRDS_PASSWORD (variable d'environnement / secret Modal) sinon ~/.pgpass.
-    """
-    global conn
-    import wrds
-    import wrds.sql
-
-    def _no_prompt(self):
-        raise RuntimeError(
-            "Connexion WRDS refusée (cause dans la ligne err=... ci-dessus). Causes usuelles : "
-            "mot de passe/username faux, notification Duo non validée à temps, IP refusée.")
-
-    wrds.sql.Connection._Connection__get_user_credentials = _no_prompt
-
-    kw = {"wrds_username": WRDS_USER, "verbose": True}
-    pwd = os.environ.get("WRDS_PASSWORD")
-    if pwd:
-        kw["wrds_password"] = pwd
-    elif not pgpass_ok(WRDS_USER):
-        sys.exit(f"Ni WRDS_PASSWORD ni ~/.pgpass pour {WRDS_USER}. Lancez une fois : "
-                 f"python data_getter.py --init-pgpass --wrds-user {WRDS_USER}")
-    if conn is not None:
-        try:
-            conn.close()
-        except Exception:
-            pass
-    log.info("connexion WRDS en tant que %s (%s)", WRDS_USER, "mot de passe env" if pwd else ".pgpass")
-    conn = wrds.Connection(**kw)
+    """Connexion WRDS sans invite (voir saf.wrds.WrdsSession)."""
+    global conn, _session
+    if _session is None or _session.user != WRDS_USER:
+        _session = WrdsSession(WRDS_USER, log=log)
+    conn = _session.connect()
     return conn
 
 
 def sql(query, params=None, date_cols=None, retries=1):
     """raw_sql avec UNE reconnexion + nouvelle tentative si la connexion est coupée.
     Si la seconde tentative échoue, l'erreur remonte (le jour est noté dans failed.csv)."""
-    attempts = retries + 1
-    for k in range(attempts):
-        try:
-            return conn.raw_sql(query, params=params, date_cols=date_cols)
-        except Exception as e:
-            # Nouvelle tentative uniquement pour une vraie coupure (erreurs de pilote/connexion),
-            # jamais pour un bug de code ou une table absente.
-            transient = (type(e).__name__ in ("OperationalError", "InterfaceError", "DisconnectionError")
-                         or isinstance(e, (ConnectionError, TimeoutError)))
-            missing = "does not exist" in str(e).lower()
-            if missing or not transient or k == attempts - 1:
-                raise
-            wait = 30
-            log.warning("connexion perdue (%s) -> reconnexion dans %ss", str(e)[:120], wait)
-            time.sleep(wait)
-            connect()
+    global conn
+    out = _session.sql(query, params=params, date_cols=date_cols, retries=retries)
+    conn = _session.conn
+    return out
 
 
 # ---------------------------------------------------------------- univers
 # 1. Univers PIT (sortie de build_sp500_pit_ids.py). Aucun filtre de nom appliqué ici.
 #    Filtres de l'article (documentés, NON appliqués) : NYSE/NASDAQ/AMEX, share code 10/11,
 #    prix 1–1000 $, >= 100 transactions/jour, historique complet 2000–2020.
-
-DATE_COLS = ["valid_from", "valid_to", "member_from", "member_to"]
-STR_COLS = {"gvkey": str, "cusip8": str, "cusip9": str, "crsp_ticker": str,
-            "crsp_tradingsymbol": str, "shareclass": str}
-
-
-def load_segments(path):
-    path = Path(path)
-    if path.suffix in (".xlsx", ".xls"):
-        seg = pd.read_excel(path, dtype=STR_COLS)
-    else:
-        seg = pd.read_csv(path, dtype=STR_COLS)
-    for col in DATE_COLS:
-        if pd.api.types.is_numeric_dtype(seg[col]):           # dates sérialisées par Excel
-            seg[col] = pd.to_datetime(seg[col], unit="D", origin="1899-12-30")
-        else:
-            seg[col] = pd.to_datetime(seg[col])
-    return seg
-
-
-
-# 2. Univers d'un mois : tout PERMNO membre à un moment du mois (on télécharge le mois entier ;
-#    l'appartenance se réapplique à la date d'événement en aval).
-def get_monthly_universe(df, month):
-    month = pd.Period(month, freq="M")
-    start, end = month.start_time.normalize(), month.end_time.normalize()
-    mask = ((df["valid_from"] <= end) & (df["valid_to"] >= start)
-            & (df["member_from"] <= end) & (df["member_to"] >= start))
-    return df.loc[mask].copy()
-
-
-def crsp_to_taq_symbol(ticker, tradingsymbol, shareclass):
-    """Repli sans table de lien : CRSP (BRK, BRKB, B) -> TAQ (sym_root=BRK, sym_suffix=B)."""
-    if (isinstance(shareclass, str) and isinstance(tradingsymbol, str)
-            and isinstance(ticker, str) and tradingsymbol == f"{ticker}{shareclass}"):
-        return ticker, shareclass
-    sym = tradingsymbol if isinstance(tradingsymbol, str) else ticker
-    return sym, ""
-
 
 # ---------------------------------------------------------------- symboles
 # 4. Correspondance PERMNO -> (sym_root, sym_suffix), jour par jour.
@@ -429,10 +335,10 @@ def check():
 def main():
     global WRDS_USER, CRSP_DSF_DIR, FREQ, BATCH_SIZE
     a = argparse.ArgumentParser()
-    a.add_argument("--segments", default="sp500_pit_identifiers_segments.csv")
+    a.add_argument("--segments", default=str(SEGMENTS))
     a.add_argument("--start", default="2008-01")
     a.add_argument("--end", default="2026-06")
-    a.add_argument("--out", default=None, help="défaut data_wrds_<freq>")
+    a.add_argument("--out", default=None, help="défaut data/taq/wrds_<freq>")
     a.add_argument("--freq", default=FREQ)
     a.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     a.add_argument("--wrds-user", default=os.environ.get("WRDS_USERNAME"))
@@ -444,7 +350,7 @@ def main():
     args = a.parse_args()
 
     FREQ, BATCH_SIZE, CRSP_DSF_DIR = args.freq, args.batch_size, args.crsp_dsf_dir
-    out_dir = Path(args.out or f"data_wrds_{FREQ}")
+    out_dir = Path(args.out or DATA_DIR / "taq" / f"wrds_{FREQ}")
     out_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
                         handlers=[logging.StreamHandler(), logging.FileHandler(out_dir / "data_getter.log")])
