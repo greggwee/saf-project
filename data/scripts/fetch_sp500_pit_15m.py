@@ -21,9 +21,10 @@ Sortie (un parquet par PERMNO dans --out)
 Usage
   export DATABENTO_API_KEY=db-xxxxxxxx
   pip install databento pandas pyarrow
-  python fetch_sp500_pit_15m.py --segments sp500_pit_identifiers_segments.csv --dry-run
-  python fetch_sp500_pit_15m.py --segments sp500_pit_identifiers_segments.csv --out mid15m --limit 5
-  python fetch_sp500_pit_15m.py --segments sp500_pit_identifiers_segments.csv --out mid15m
+  # défauts : --segments data/universe/sp500_pit_identifiers_segments.csv, --out data/taq/databento_mid15m
+  python data/scripts/fetch_sp500_pit_15m.py --dry-run
+  python data/scripts/fetch_sp500_pit_15m.py --limit 5
+  python data/scripts/fetch_sp500_pit_15m.py
 
 Points à vérifier avant le run complet : voir la liste fournie avec le script
 (sémantique du bbo-1m, date de début, BBO incluant les odd lots, demi-séances, etc.).
@@ -39,6 +40,7 @@ import pandas as pd
 
 from saf.universe import clip_segments, databento_candidates, load_segments
 
+DATA_DIR = Path(__file__).resolve().parents[1]                     # dossier data/ du repo
 NY = "America/New_York"
 SCHEMA = "bbo-1m"
 RAW_COLS = ["ts_recv", "ts_event", "instrument_id", "symbol",
@@ -57,11 +59,11 @@ def load_dotenv(path=Path(__file__).with_name(".env")):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--segments", required=True)
+    p.add_argument("--segments", default=str(DATA_DIR / "universe" / "sp500_pit_identifiers_segments.csv"))
     p.add_argument("--dataset", default="EQUS.MINI")
     p.add_argument("--start", default=None, help="YYYY-MM-DD, défaut = début du dataset")
     p.add_argument("--end", default=None, help="YYYY-MM-DD inclus, défaut = fin du dataset")
-    p.add_argument("--out", default="mid15m")
+    p.add_argument("--out", default=str(DATA_DIR / "taq" / "databento_mid15m"))
     p.add_argument("--freq", default="15min")
     p.add_argument("--max-stale", type=float, default=300,
                    help="secondes : au-delà, la cotation est jugée périmée -> mid = NaN")

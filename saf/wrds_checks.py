@@ -1,4 +1,4 @@
-"""Sanity checks on the raw WRDS pull, written to ``CHECKS.md`` (+ ``checks_monthly.csv``).
+"""Sanity checks on the raw WRDS pull, written to ``data/meta/CHECKS.md`` (+ ``checks_monthly.csv``).
 
 Pure functions on DataFrames (testable without WRDS) and :func:`run_checks` which reads the pull.
 Interval convention: a start/end pair is inclusive and a missing end date means "still open".
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from saf.wrds_pull import BY_NAME, read_table
+from saf.wrds_pull import BY_NAME, meta_dir, read_table
 
 SAMPLE_START = "2008-01-01"
 MEMBERS_MIN, MEMBERS_MAX = 500, 505
@@ -133,9 +133,10 @@ def _md(df):
     return "\n".join(lines) + "\n"
 
 
-def run_checks(out_dir, end=None):
-    """Run every check on the pull in ``out_dir``; write CHECKS.md and checks_monthly.csv."""
-    out_dir = Path(out_dir)
+def run_checks(data_dir, end=None):
+    """Run every check on the pull in ``data_dir``; write meta/CHECKS.md and meta/checks_monthly.csv."""
+    out_dir = Path(data_dir)
+    meta = meta_dir(out_dir)
     msp = read_table(out_dir, "crsp_msp500list_v2")
     ccm = read_table(out_dir, "crsp_ccmxpf_lnkhist")
     dsf = read_table(out_dir, "crsp_dsf_v2", columns=["permno", "dlycaldt", "shrout", "dlyfacprc"])
@@ -160,7 +161,7 @@ def run_checks(out_dir, end=None):
     dates = month_ends(dsf["dlycaldt"], SAMPLE_START, end)
     mem = members(msp, dates)
     cov, ml = coverage_table(mem, dsf, ccm, fundq, funda, hgic)
-    cov.to_csv(out_dir / "checks_monthly.csv", index=False)
+    cov.to_csv(meta / "checks_monthly.csv", index=False)
 
     # 2. members per month-end
     bad = cov[(cov["members"] < MEMBERS_MIN) | (cov["members"] > MEMBERS_MAX)]
@@ -194,5 +195,5 @@ def run_checks(out_dir, end=None):
     s += [f"| {a} | {b} | {'yes' if ok else 'NO'} |" for a, b, ok in nvda_units(dsf)]
     s += ["", "Per-month coverage table: `checks_monthly.csv`."]
 
-    (out_dir / "CHECKS.md").write_text("\n".join(s) + "\n")
+    (meta / "CHECKS.md").write_text("\n".join(s) + "\n")
     return cov

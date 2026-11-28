@@ -1,6 +1,6 @@
 """Point-in-time S&P 500 universe: segment loading, monthly universe, symbol mapping.
 
-A *segment* is one row of ``data/sp500_pit_identifiers_segments.csv``: a PERMNO over a period
+A *segment* is one row of ``data/universe/sp500_pit_identifiers_segments.csv``: a PERMNO over a period
 during which it is an index member and its ticker/CUSIP are stable, so symbols are taken as-of.
 
 Key columns used here:

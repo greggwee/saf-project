@@ -36,6 +36,8 @@ from saf.universe import crsp_to_taq_symbol, get_monthly_universe, load_segments
 from saf.wrds import PGPASS_HOST, PGPASS_PORT, WrdsSession, init_pgpass, pgpass_ok  # noqa: F401
 
 log = logging.getLogger("data_getter")
+DATA_DIR = Path(__file__).resolve().parents[1]                     # dossier data/ du repo
+SEGMENTS = DATA_DIR / "universe" / "sp500_pit_identifiers_segments.csv"
 conn = None
 _session = None
 WRDS_USER = None
@@ -333,10 +335,10 @@ def check():
 def main():
     global WRDS_USER, CRSP_DSF_DIR, FREQ, BATCH_SIZE
     a = argparse.ArgumentParser()
-    a.add_argument("--segments", default="sp500_pit_identifiers_segments.csv")
+    a.add_argument("--segments", default=str(SEGMENTS))
     a.add_argument("--start", default="2008-01")
     a.add_argument("--end", default="2026-06")
-    a.add_argument("--out", default=None, help="défaut data_wrds_<freq>")
+    a.add_argument("--out", default=None, help="défaut data/taq/wrds_<freq>")
     a.add_argument("--freq", default=FREQ)
     a.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     a.add_argument("--wrds-user", default=os.environ.get("WRDS_USERNAME"))
@@ -348,7 +350,7 @@ def main():
     args = a.parse_args()
 
     FREQ, BATCH_SIZE, CRSP_DSF_DIR = args.freq, args.batch_size, args.crsp_dsf_dir
-    out_dir = Path(args.out or f"data_wrds_{FREQ}")
+    out_dir = Path(args.out or DATA_DIR / "taq" / f"wrds_{FREQ}")
     out_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
                         handlers=[logging.StreamHandler(), logging.FileHandler(out_dir / "data_getter.log")])

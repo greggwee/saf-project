@@ -8,7 +8,7 @@ Mise en place (une fois, en local)
   # Splits/dividendes : régularisés a posteriori en local avec adjust_overnight.py
   # (ne pas mettre CRSP sur le volume, sinon les jours de split passent à NaN)
 
-Dossier local attendu : data_getter.py, sp500_pit_identifiers_segments.csv, modal_app.py
+Fichiers locaux embarqués : data/scripts/data_getter.py, saf/, data/universe/sp500_pit_identifiers_segments.csv
 
 Lancement
   modal run modal_app.py --check                                # schémas WRDS
@@ -46,7 +46,7 @@ image = (
                  "sqlalchemy>=2,<2.1", "numpy<2.3", "pyarrow")
     .add_local_file(here / "data_getter.py", "/root/data_getter.py")
     .add_local_dir(here.parents[1] / "saf", "/root/saf")   # shared library (saf.universe, ...)
-    .add_local_file(here / SEGMENTS, f"/root/{SEGMENTS}")
+    .add_local_file(here.parent / "universe" / SEGMENTS, f"/root/{SEGMENTS}")
 )
 
 app = modal.App(APP_NAME, image=image)

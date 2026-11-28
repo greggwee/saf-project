@@ -18,13 +18,16 @@ The course grades the project on three engineering criteria. Every change must r
 saf/                  # shared Python package: the ONLY place reusable logic lives
   universe.py         # S&P 500 PIT segments, monthly universe, symbol mapping (CRSP -> TAQ/Databento)
   wrds.py             # WRDS connection, ~/.pgpass handling, retrying SQL helper
+  wrds_pull.py        # non-TAQ WRDS table specs + pull;  wrds_checks.py: checks on the pull
   grid.py             # 15-min grid construction, midquote snapping, staleness checks
   returns.py          # intraday log returns, overnight returns, split/dividend adjustment
   io.py               # parquet read/write, paths, dataset conventions
   ...                 # analysis modules (realized measures, models, plots) as the project grows
-data/                 # data-building entry points (thin CLIs) + small committed reference CSVs
-  build_sp500_pit_ids.py
-  utils/              # current ingestion scripts (to migrate into saf/ + thin CLIs)
+data/                 # one subfolder per data source + the scripts that build them (see data/README.md)
+  scripts/            # thin CLIs: pull_wrds.py, data_getter.py, modal_app.py, build_sp500_pit_ids.py, ...
+  universe/           # committed: S&P 500 PIT identifier segments
+  crsp/ compustat/ ff/ fred/ taq/   # pulled data, gitignored (licences)
+  meta/               # manifests, schemas, checks of the pulls, gitignored
 analysis/             # thin scripts that produce every table/figure used in the paper and slides
 notebooks/            # exploration only; import from saf/, never define reusable logic here
 tests/                # pytest tests for saf/
@@ -49,9 +52,10 @@ slides/               # presentation sources (see section 3)
   staleness threshold) defined once in `saf` and imported, never re-hardcoded.
 - No secrets in code or commits. Credentials come from `.env` (gitignored), `~/.pgpass`,
   or Modal secrets. Never print or log them.
-- Large data (`mid15m/`, parquet outputs, raw TAQ/Databento pulls) is not committed; only small
-  reference files such as `data/sp500_pit_identifiers_segments.csv`. Document how to regenerate
-  every dataset.
+- Data lives in `data/<source>/` (crsp, compustat, ff, fred, taq). Pulled data is not committed
+  (WRDS/Databento licences); only small reference files such as
+  `data/universe/sp500_pit_identifiers_segments.csv`. Document how to regenerate every dataset in
+  `data/README.md`. Scripts default to these folders, so no path needs to be passed.
 - Python 3, `numpy`/`pandas`/`pyarrow`. Pin dependencies in `requirements.txt` (or
   `pyproject.toml`) when adding one. Write new code, comments and docstrings in English.
 - Add or update `pytest` tests in `tests/` for any `saf/` function with non-trivial logic
@@ -89,12 +93,13 @@ slides/               # presentation sources (see section 3)
 
 ## Reference: current data pipeline
 
-- `data/build_sp500_pit_ids.py`: builds `sp500_pit_identifiers_segments.csv` (PERMNO x period with
-  stable ticker/CUSIP) from CRSP/CCM/IBES/CIQ parquet extracts.
-- `data/utils/data_getter.py`: WRDS TAQ millisecond NBBO midquotes on the 15-min grid, plus
-  overnight returns (`--check`, `--start/--end`, `--overnight-only`).
-- `data/utils/modal_app.py`: runs `data_getter.py` on Modal, one container per month.
-- `data/utils/fetch_sp500_pit_15m.py`: alternative source, Databento EQUS.MINI `bbo-1m`.
-- `data/pull_wrds.py`: every non-TAQ WRDS table for features/targets (CRSP, CCM, Compustat,
-  Fama-French) into `wrds_raw/` (gitignored, WRDS licence), with `manifest.csv` and `CHECKS.md`.
-  Table specs in `saf/wrds_pull.py`, checks in `saf/wrds_checks.py`.
+See [data/README.md](data/README.md) for what each folder holds and which script fills it.
+
+- `data/scripts/build_sp500_pit_ids.py` -> `data/universe/`: S&P 500 PIT identifier segments.
+- `data/scripts/pull_wrds.py` -> `data/crsp/`, `data/compustat/`, `data/ff/`, `data/fred/`,
+  `data/meta/`: every non-TAQ WRDS table for features/targets. Specs in `saf/wrds_pull.py`, checks
+  in `saf/wrds_checks.py`.
+- `data/scripts/data_getter.py` (+ `modal_app.py` on Modal) -> `data/taq/wrds_15min/`: WRDS TAQ NBBO
+  midquotes on the 15-min grid plus overnight returns.
+- `data/scripts/fetch_sp500_pit_15m.py` -> `data/taq/databento_mid15m/`: alternative source,
+  Databento EQUS.MINI `bbo-1m`.

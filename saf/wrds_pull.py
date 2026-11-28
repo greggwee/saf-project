@@ -4,9 +4,11 @@ Each table is described by a :class:`TableSpec`. The SELECT list is built from t
 (``describe_table``) so that requested columns are checked before any data is pulled and NUMERIC
 columns are cast to float8 in SQL (otherwise pandas receives ``Decimal`` objects).
 
-Output in ``out_dir``: ``<name>.parquet`` or ``<name>_<YYYY>.parquet`` (zstd) for yearly tables,
-``manifest.csv`` (file, rows, seconds, pulled_utc, sql) and ``_schemas.txt``.
-Existing files are skipped, so an interrupted run resumes where it stopped.
+Output under ``data_dir`` (the repo's ``data/`` folder), one subfolder per source:
+``crsp/``, ``compustat/``, ``ff/`` hold ``<name>.parquet`` or ``<name>_<YYYY>.parquet`` (zstd) for
+yearly tables; ``meta/`` holds ``manifest.csv`` (file, rows, seconds, pulled_utc, sql),
+``_schemas.txt``, ``README.md`` and the checks. Existing files are skipped, so an interrupted run
+resumes where it stopped.
 """
 import time
 from dataclasses import dataclass
@@ -26,6 +28,10 @@ UNIVERSE_GVKEYS = (f"SELECT DISTINCT gvkey FROM crspq.ccmxpf_lnkhist "
                    f"WHERE {CCM_FILTER} AND lpermno IN ({UNIVERSE_PERMNOS})")
 COMP_FILTER = "indfmt = 'INDL' AND datafmt = 'STD' AND popsrc = 'D' AND consol = 'C'"
 COMMON_STOCK = "sharetype = 'NS' AND securitytype = 'EQTY' AND securitysubtype = 'COM'"
+
+SOURCE_DIRS = {"crspq": "crsp", "crsp": "crsp", "comp": "compustat", "ff": "ff"}
+META_DIR = "meta"           # manifest, schemas, README and checks of the pull
+FRED_DIR = "fred"
 
 _FLOAT_TYPES = ("NUMERIC", "DECIMAL")
 _DATE_TYPES = ("DATE", "TIMESTAMP")
@@ -53,6 +59,11 @@ class TableSpec:
     to_end: bool = False
     yearly: bool = False
     keys: tuple = ()
+
+    @property
+    def folder(self):
+        """Subfolder of ``data/`` for this table's source (crsp, compustat, ff)."""
+        return SOURCE_DIRS.get(self.lib, self.lib)
 
 
 TABLES = (
@@ -171,8 +182,15 @@ def latest_crsp_date(session):
     return pd.Timestamp(d)
 
 
-def write_schemas(session, out_dir, tables=TABLES):
-    """describe_table for every table -> ``_schemas.txt``; returns {name: schema DataFrame}."""
+def meta_dir(data_dir):
+    """``data/meta`` (created if needed)."""
+    d = Path(data_dir) / META_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def write_schemas(session, data_dir, tables=TABLES):
+    """describe_table for every table -> ``meta/_schemas.txt``; returns {name: schema DataFrame}."""
     schemas, parts = {}, []
     for spec in tables:
         key = f"{spec.lib}.{spec.table}"
@@ -181,7 +199,7 @@ def write_schemas(session, out_dir, tables=TABLES):
             parts.append(f"## {key}\n{sch.to_string(index=False)}\n")
         except Exception as e:
             parts.append(f"## {key}\nERROR: {e}\n")
-    (Path(out_dir) / "_schemas.txt").write_text("\n".join(parts))
+    (meta_dir(data_dir) / "_schemas.txt").write_text("\n".join(parts))
     return schemas
 
 
@@ -195,15 +213,15 @@ def _read_manifest(path):
     return {r["file"]: r for r in pd.read_csv(path).to_dict("records")}
 
 
-def pull(session, out_dir, end, tables=TABLES, schemas=None, log=print):
-    """Pull every chunk of every table sequentially; skip files that already exist.
+def pull(session, data_dir, end, tables=TABLES, schemas=None, log=print):
+    """Pull every chunk of every table sequentially into ``data_dir/<source>/``; skip existing files.
 
-    Returns the manifest DataFrame (also written to ``manifest.csv`` after each file).
+    Returns the manifest DataFrame (also written to ``meta/manifest.csv`` after each file); its
+    ``file`` column is the path relative to ``data_dir``, e.g. ``crsp/crsp_dsf_v2_2004.parquet``.
     """
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = Path(data_dir)
     schemas = schemas or {}
-    man_path = out_dir / "manifest.csv"
+    man_path = meta_dir(data_dir) / "manifest.csv"
     manifest = _read_manifest(man_path)
 
     def _frame():
@@ -213,8 +231,11 @@ def pull(session, out_dir, end, tables=TABLES, schemas=None, log=print):
         if schema is None:
             schema = schemas[spec.name] = session.describe(spec.lib, spec.table)
         dcols = date_columns(spec, schema)
+        folder = data_dir / spec.folder
+        folder.mkdir(parents=True, exist_ok=True)
         for stem, lo, hi in chunks(spec, end):
-            f = out_dir / f"{stem}.parquet"
+            f = folder / f"{stem}.parquet"
+            rel = f"{spec.folder}/{f.name}"
             if f.exists():
                 continue
             q = build_query(spec, schema, lo, hi)
@@ -223,21 +244,26 @@ def pull(session, out_dir, end, tables=TABLES, schemas=None, log=print):
             for c in dcols:    # out-of-range sentinels such as 9999-12-31 become NaT (= open)
                 df[c] = pd.to_datetime(df[c], errors="coerce")
             df.to_parquet(f, compression="zstd", index=False)
-            row = {"file": f.name, "rows": len(df), "seconds": round(time.time() - t0, 1),
+            row = {"file": rel, "rows": len(df), "seconds": round(time.time() - t0, 1),
                    "pulled_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "sql": q}
-            manifest[f.name] = row
+            manifest[rel] = row
             _frame().to_csv(man_path, index=False)
-            log(f"{f.name}: {len(df):,} rows in {row['seconds']}s")
+            log(f"{rel}: {len(df):,} rows in {row['seconds']}s")
     return _frame()
 
 
-def read_table(out_dir, name, columns=None):
-    """Read a pulled table, concatenating yearly files ``<name>_YYYY.parquet`` if needed."""
-    out_dir = Path(out_dir)
-    single = out_dir / f"{name}.parquet"
-    files = [single] if single.exists() else sorted(out_dir.glob(f"{name}_[0-9][0-9][0-9][0-9].parquet"))
+def read_table(data_dir, name, columns=None, folder=None):
+    """Read a pulled table from ``data_dir/<folder>/``, concatenating yearly files if needed.
+
+    ``folder`` defaults to the source folder of the table in :data:`TABLES` (e.g. crsp).
+    """
+    if folder is None:
+        folder = BY_NAME[name].folder if name in BY_NAME else ""
+    d = Path(data_dir) / folder
+    single = d / f"{name}.parquet"
+    files = [single] if single.exists() else sorted(d.glob(f"{name}_[0-9][0-9][0-9][0-9].parquet"))
     if not files:
-        raise FileNotFoundError(f"no file for {name} in {out_dir}")
+        raise FileNotFoundError(f"no file for {name} in {d}")
     return pd.concat([pd.read_parquet(f, columns=columns) for f in files], ignore_index=True)
 
 
@@ -252,24 +278,25 @@ def fetch_fred(series, path, timeout=30):
         Path(path).write_bytes(r.read())
 
 
-def write_readme(out_dir, end, manifest, notes=()):
-    """README.md describing the pull: tables, filters, period, files."""
+def write_readme(data_dir, end, manifest, notes=()):
+    """meta/README.md describing the pull: tables, filters, period, files."""
     lines = ["# WRDS raw pull (feature engineering, no TAQ)", "",
-             f"Pulled {datetime.now(timezone.utc):%Y-%m-%d} UTC with `data/pull_wrds.py`; "
+             f"Pulled {datetime.now(timezone.utc):%Y-%m-%d} UTC with `data/scripts/pull_wrds.py`; "
              f"end date (latest CRSP day) {_iso(end)}.",
              "WRDS licence: do not share these files outside the team.", "",
              f"Universe permnos: every permno in crspq.msp500list_v2 with mbrenddt >= {UNIVERSE_FROM}.",
              "No name filter is applied to the S&P 500 universe; the common-stock filter on msf_v2 "
              "only serves industry / cross-sectional aggregates.", "",
-             "| name | WRDS table | filters | period | files | rows |", "|---|---|---|---|---|---|"]
+             "| name | folder | WRDS table | filters | period | files | rows |",
+             "|---|---|---|---|---|---|---|"]
     for spec in TABLES:
-        files = manifest[manifest["file"].str.match(rf"^{spec.name}(_\d{{4}})?\.parquet$")]
+        files = manifest[manifest["file"].str.match(rf"^{spec.folder}/{spec.name}(_\d{{4}})?\.parquet$")]
         period = f"{spec.start or 'all'} -> {'latest' if spec.to_end else 'all'}" if spec.date_col else "all"
         filt = "; ".join(spec.where).replace(UNIVERSE_PERMNOS, "universe permnos") \
             .replace(UNIVERSE_GVKEYS, "universe gvkeys (via CCM)") or "-"
-        lines.append(f"| `{spec.name}` | {spec.lib}.{spec.table} | {filt} | {period} | "
+        lines.append(f"| `{spec.name}` | `{spec.folder}/` | {spec.lib}.{spec.table} | {filt} | {period} | "
                      f"{len(files)} | {int(files['rows'].sum()):,} |")
     lines += ["", "Exact SQL for every file is in `manifest.csv`; live schemas in `_schemas.txt`; "
-              "checks in `CHECKS.md`."]
+              "checks in `CHECKS.md` (all in `data/meta/`)."]
     lines += [""] + [f"- {n}" for n in notes]
-    (Path(out_dir) / "README.md").write_text("\n".join(lines) + "\n")
+    (meta_dir(data_dir) / "README.md").write_text("\n".join(lines) + "\n")

@@ -69,12 +69,13 @@ def test_pull_writes_files_manifest_and_resumes(tmp_path):
     data = {y: pd.DataFrame({"id": [1], "d": [f"{y}-06-01"], "x": [1.5]}) for y in ("2020", "2021")}
     s = FakeSession(data)
     man = wp.pull(s, tmp_path, "2021-12-31", tables=(SPEC,), log=lambda *_: None)
-    assert sorted(man["file"]) == ["t_2020.parquet", "t_2021.parquet"]
+    assert sorted(man["file"]) == ["lib/t_2020.parquet", "lib/t_2021.parquet"]   # relative to data_dir
+    assert (tmp_path / "meta" / "manifest.csv").exists()
     assert man["rows"].tolist() == [1, 1]
-    df = wp.read_table(tmp_path, "t")
+    df = wp.read_table(tmp_path, "t", folder="lib")
     assert len(df) == 2 and pd.api.types.is_datetime64_any_dtype(df["d"])
 
-    (tmp_path / "t_2021.parquet").unlink()
+    (tmp_path / "lib" / "t_2021.parquet").unlink()
     s2 = FakeSession(data)
     man = wp.pull(s2, tmp_path, "2021-12-31", tables=(SPEC,), log=lambda *_: None)
     assert len(s2.queries) == 1 and "2021" in s2.queries[0]       # only the missing file
@@ -86,5 +87,12 @@ def test_date_sentinel_becomes_nat(tmp_path):
     s = FakeSession({})
     s.sql = lambda q, **k: pd.DataFrame({"id": [1, 2], "d": ["2020-01-01", "9999-12-31"]})
     wp.pull(s, tmp_path, None, tables=(spec,), log=lambda *_: None)
-    d = wp.read_table(tmp_path, "m")["d"]
+    d = wp.read_table(tmp_path, "m", folder="lib")["d"]
     assert d.iloc[0] == pd.Timestamp("2020-01-01") and pd.isna(d.iloc[1])
+
+
+def test_tables_go_to_source_folders():
+    assert {t.folder for t in wp.TABLES} == {"crsp", "compustat", "ff"}
+    assert wp.BY_NAME["crsp_dsf_v2"].folder == "crsp"
+    assert wp.BY_NAME["comp_fundq"].folder == "compustat"
+    assert wp.BY_NAME["ff_factors_daily"].folder == "ff"
