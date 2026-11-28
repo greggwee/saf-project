@@ -35,9 +35,10 @@ slides/               # presentation sources (see section 3)
 ### Rules
 
 - **Shared logic goes in `saf/`.** If a function is (or could be) used by two scripts, notebooks or
-  team members, it belongs in the package, not copied. Example to fix: `load_segments` and the
-  CRSP-to-ticker symbol mapping exist in both `data/utils/data_getter.py` and
-  `data/utils/fetch_sp500_pit_15m.py`; they should live once in `saf/universe.py`.
+  team members, it belongs in the package, not copied. Example: segment loading and CRSP symbol
+  mapping live once in `saf/universe.py` and both ingestion scripts import them.
+- **Setup:** `pip install -e ".[dev]"` from the repo root makes `saf` importable from any script
+  or notebook; run tests with `pytest`. Modal jobs ship `saf/` in the image (`modal_app.py`).
 - **Scripts are thin.** Entry points parse arguments, call `saf` functions, and write outputs.
   Use `argparse` and a `main()` guarded by `if __name__ == "__main__":`.
 - **Notebooks never hold the source of truth.** Anything worth keeping moves into `saf/` or

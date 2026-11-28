@@ -45,6 +45,7 @@ image = (
     .pip_install("wrds==3.3.0", "pandas==2.2.3", "pandas_market_calendars==5.5.0",
                  "sqlalchemy>=2,<2.1", "numpy<2.3", "pyarrow")
     .add_local_file(here / "data_getter.py", "/root/data_getter.py")
+    .add_local_dir(here.parents[1] / "saf", "/root/saf")   # shared library (saf.universe, ...)
     .add_local_file(here / SEGMENTS, f"/root/{SEGMENTS}")
 )
 

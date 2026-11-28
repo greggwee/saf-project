@@ -33,6 +33,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from saf.universe import crsp_to_taq_symbol, get_monthly_universe, load_segments
+
 log = logging.getLogger("data_getter")
 conn = None
 WRDS_USER = None
@@ -121,45 +123,6 @@ def sql(query, params=None, date_cols=None, retries=1):
 # 1. Univers PIT (sortie de build_sp500_pit_ids.py). Aucun filtre de nom appliqué ici.
 #    Filtres de l'article (documentés, NON appliqués) : NYSE/NASDAQ/AMEX, share code 10/11,
 #    prix 1–1000 $, >= 100 transactions/jour, historique complet 2000–2020.
-
-DATE_COLS = ["valid_from", "valid_to", "member_from", "member_to"]
-STR_COLS = {"gvkey": str, "cusip8": str, "cusip9": str, "crsp_ticker": str,
-            "crsp_tradingsymbol": str, "shareclass": str}
-
-
-def load_segments(path):
-    path = Path(path)
-    if path.suffix in (".xlsx", ".xls"):
-        seg = pd.read_excel(path, dtype=STR_COLS)
-    else:
-        seg = pd.read_csv(path, dtype=STR_COLS)
-    for col in DATE_COLS:
-        if pd.api.types.is_numeric_dtype(seg[col]):           # dates sérialisées par Excel
-            seg[col] = pd.to_datetime(seg[col], unit="D", origin="1899-12-30")
-        else:
-            seg[col] = pd.to_datetime(seg[col])
-    return seg
-
-
-
-# 2. Univers d'un mois : tout PERMNO membre à un moment du mois (on télécharge le mois entier ;
-#    l'appartenance se réapplique à la date d'événement en aval).
-def get_monthly_universe(df, month):
-    month = pd.Period(month, freq="M")
-    start, end = month.start_time.normalize(), month.end_time.normalize()
-    mask = ((df["valid_from"] <= end) & (df["valid_to"] >= start)
-            & (df["member_from"] <= end) & (df["member_to"] >= start))
-    return df.loc[mask].copy()
-
-
-def crsp_to_taq_symbol(ticker, tradingsymbol, shareclass):
-    """Repli sans table de lien : CRSP (BRK, BRKB, B) -> TAQ (sym_root=BRK, sym_suffix=B)."""
-    if (isinstance(shareclass, str) and isinstance(tradingsymbol, str)
-            and isinstance(ticker, str) and tradingsymbol == f"{ticker}{shareclass}"):
-        return ticker, shareclass
-    sym = tradingsymbol if isinstance(tradingsymbol, str) else ticker
-    return sym, ""
-
 
 # ---------------------------------------------------------------- symboles
 # 4. Correspondance PERMNO -> (sym_root, sym_suffix), jour par jour.

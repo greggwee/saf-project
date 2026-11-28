@@ -37,17 +37,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from saf.universe import clip_segments, databento_candidates, load_segments
+
 NY = "America/New_York"
 SCHEMA = "bbo-1m"
 RAW_COLS = ["ts_recv", "ts_event", "instrument_id", "symbol",
             "bid_px_00", "ask_px_00", "bid_sz_00", "ask_sz_00", "price", "size", "side"]
-
-# Corrections manuelles ticker CRSP -> raw_symbol Databento (convention Nasdaq, ex. BRK.B).
-# Valeur = liste de candidats essayés dans l'ordre.
-SYMBOL_OVERRIDES = {
-    "BRK": ["BRK.B"],   # CRSP : ticker BRK, tradingsymbol BRKB, classe B
-    "BF": ["BF.B"],
-}
 
 
 def load_dotenv(path=Path(__file__).with_name(".env")):
@@ -76,31 +71,6 @@ def parse_args():
     p.add_argument("--sleep", type=float, default=0.2)
     p.add_argument("--retries", type=int, default=3)
     return p.parse_args()
-
-
-# ---------------------------------------------------------------- symboles
-def candidates(ticker, tradingsymbol, shareclass):
-    """Candidats raw_symbol (convention Nasdaq) pour un segment CRSP."""
-    if ticker in SYMBOL_OVERRIDES:
-        return list(SYMBOL_OVERRIDES[ticker])
-    c = []
-    if isinstance(shareclass, str) and isinstance(tradingsymbol, str) and tradingsymbol == f"{ticker}{shareclass}":
-        c.append(f"{ticker}.{shareclass}")       # BRK + B -> BRK.B
-    for s in (tradingsymbol, ticker):
-        if isinstance(s, str) and s and s not in c:
-            c.append(s)
-    return c
-
-
-def load_segments(path, lo, hi):
-    s = pd.read_csv(path, dtype={"gvkey": str, "cusip8": str, "cusip9": str,
-                                 "crsp_ticker": str, "crsp_tradingsymbol": str, "shareclass": str},
-                    parse_dates=["valid_from", "valid_to"])
-    s = s.dropna(subset=["crsp_ticker"])
-    s["req_start"] = s["valid_from"].clip(lower=lo)
-    s["req_end"] = (s["valid_to"] + pd.Timedelta(days=1)).clip(upper=hi)   # end exclusif
-    s = s[s["req_start"] < s["req_end"]].copy()
-    return s.sort_values(["permno", "req_start"]).reset_index(drop=True)
 
 
 def year_chunks(start, end):
@@ -210,7 +180,7 @@ def main():
     hi = min(ds_hi, pd.Timestamp(a.end) + pd.Timedelta(days=1)) if a.end else ds_hi
     print(f"{a.dataset} {SCHEMA}: disponible {ds_lo.date()} -> {ds_hi.date()} ; fenêtre {lo.date()} -> {hi.date()}")
 
-    seg = load_segments(a.segments, lo, hi)
+    seg = clip_segments(load_segments(a.segments), lo, hi)
     permnos = seg["permno"].unique()
     if a.limit:
         permnos = permnos[: a.limit]
@@ -226,7 +196,7 @@ def main():
     if a.dry_run:
         total = 0.0
         for r in seg.itertuples():
-            sym = candidates(r.crsp_ticker, r.crsp_tradingsymbol, r.shareclass)[0]
+            sym = databento_candidates(r.crsp_ticker, r.crsp_tradingsymbol, r.shareclass)[0]
             try:
                 total += client.metadata.get_cost(dataset=a.dataset, symbols=[sym], stype_in="raw_symbol",
                                                   schema=SCHEMA, start=r.req_start.date().isoformat(),
@@ -245,7 +215,7 @@ def main():
             continue
         grids, raws = [], []
         for r in g.itertuples():
-            cands = candidates(r.crsp_ticker, r.crsp_tradingsymbol, r.shareclass)
+            cands = databento_candidates(r.crsp_ticker, r.crsp_tradingsymbol, r.shareclass)
             for s0, s1 in year_chunks(r.req_start, r.req_end):
                 raw, used = pd.DataFrame(), None
                 for sym in cands:
