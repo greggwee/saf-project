@@ -95,3 +95,6 @@ slides/               # presentation sources (see section 3)
   overnight returns (`--check`, `--start/--end`, `--overnight-only`).
 - `data/utils/modal_app.py`: runs `data_getter.py` on Modal, one container per month.
 - `data/utils/fetch_sp500_pit_15m.py`: alternative source, Databento EQUS.MINI `bbo-1m`.
+- `data/pull_wrds.py`: every non-TAQ WRDS table for features/targets (CRSP, CCM, Compustat,
+  Fama-French) into `wrds_raw/` (gitignored, WRDS licence), with `manifest.csv` and `CHECKS.md`.
+  Table specs in `saf/wrds_pull.py`, checks in `saf/wrds_checks.py`.
