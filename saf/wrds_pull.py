@@ -19,7 +19,9 @@ import pandas as pd
 # look-back before the 2008-01 feature sample, for the 500-day realized windows).
 UNIVERSE_FROM = "2006-01-01"
 UNIVERSE_PERMNOS = f"SELECT DISTINCT permno FROM crspq.msp500list_v2 WHERE mbrenddt >= '{UNIVERSE_FROM}'"
-CCM_FILTER = "linktype IN ('LU', 'LC') AND linkprim IN ('P', 'C')"
+# LS and J are kept: LS links Eaton and Dayforce; J (secondary share class: GOOG, NWS, FOX, UA, ...)
+# links index members whose primary class is a separate permno of the same company.
+CCM_FILTER = "linktype IN ('LU', 'LC', 'LS') AND linkprim IN ('P', 'C', 'J')"
 UNIVERSE_GVKEYS = (f"SELECT DISTINCT gvkey FROM crspq.ccmxpf_lnkhist "
                    f"WHERE {CCM_FILTER} AND lpermno IN ({UNIVERSE_PERMNOS})")
 COMP_FILTER = "indfmt = 'INDL' AND datafmt = 'STD' AND popsrc = 'D' AND consol = 'C'"
